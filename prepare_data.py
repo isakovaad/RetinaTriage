@@ -59,8 +59,8 @@ def _save(processed_img, out_path: Path) -> None:
 
 def prepare_aptos(raw_root: Path, out_root: Path, size: int) -> list[dict]:
     """APTOS: train.csv has columns [id_code, diagnosis(0-4)]; images in train_images/."""
-    csv_path = raw_root / "aptos" / "train.csv"
-    img_dir = raw_root / "aptos" / "train_images"
+    csv_path = raw_root / "aptos2019-blindness-detection" / "train.csv"
+    img_dir = raw_root / "aptos2019-blindness-detection" / "train_images"
     if not csv_path.exists():
         print(f"[skip] APTOS not found at {csv_path}")
         return []
