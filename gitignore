@@ -1,0 +1,30 @@
+# Data & model artifacts (never commit raw images or checkpoints)
+data/
+processed/
+*.pt
+*.pth
+*.ckpt
+checkpoints/
+wandb/
+
+# Secrets
+.env
+.env.*
+*.json.key
+kaggle.json
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.ipynb_checkpoints/
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/
+
+# Node (frontend)
+node_modules/
+.next/

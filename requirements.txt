@@ -1,0 +1,24 @@
+# Core ML — torch/torchvision are pre-installed on Kaggle & Colab; pin only if needed locally.
+torch
+torchvision
+timm>=1.0.0
+
+# Image preprocessing & augmentation
+opencv-python-headless
+albumentations>=1.4.0
+Pillow
+
+# Data & metrics
+numpy
+pandas
+scikit-learn
+
+# Experiment tracking / monitoring
+wandb
+
+# Utilities
+tqdm
+matplotlib
+
+# Kaggle dataset download (configure ~/.kaggle/kaggle.json first)
+kaggle
