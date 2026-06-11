@@ -1,45 +1,24 @@
 """Prepare raw DR datasets into a single unified, preprocessed corpus.
 
-This turns several differently-organized datasets into ONE folder of cleaned
-images plus ONE CSV with a consistent schema (image_path, grade, domain, split).
-That unified CSV is what every downstream training/eval script reads.
+Turns several differently-organized datasets into ONE folder of cleaned images
+plus ONE CSV with a consistent schema (image_path, grade, domain, split). That
+unified CSV is what every downstream training/eval script reads.
 
-------------------------------------------------------------------------------
-STEP 0 — get the raw data (do this once, manually)
-------------------------------------------------------------------------------
-On Kaggle/Colab, set up the Kaggle API (Account -> Create New API Token gives
-kaggle.json), then:
+Run from the repo root, pointing --raw-root at /kaggle/input so BOTH the
+competition data and the dataset mirrors are reachable:
 
-    pip install kaggle
-    mkdir -p ~/.kaggle && cp kaggle.json ~/.kaggle/ && chmod 600 ~/.kaggle/kaggle.json
+    python scripts/prepare_data.py --raw-root /kaggle/input \
+        --out-root /kaggle/working/processed --size 512
 
-    # APTOS 2019 (~3.6k images, train.csv has the 0-4 grades)
-    kaggle competitions download -c aptos2019-blindness-detection -p data/raw/aptos
-
-    # EyePACS (the big one; "Diabetic Retinopathy Detection")
-    kaggle competitions download -c diabetic-retinopathy-detection -p data/raw/eyepacs
-
-Messidor-2 / IDRiD are downloaded from their own project pages (registration
-required) — drop them under data/raw/messidor2 and data/raw/idrid. Keep these
-as your HELD-OUT test domains.
-
-NOTE: this script does not auto-download (Kaggle needs your credentials). It
-expects the raw folders to already exist, then preprocesses them.
-
-------------------------------------------------------------------------------
-STEP 1 — run this script
-------------------------------------------------------------------------------
-    python scripts/prepare_data.py --raw-root data/raw --out-root processed --size 512
-
-Output:
-    processed/<domain>/<image_id>.png      cleaned images
-    processed/labels.csv                   image_path,grade,domain,split
+Sources -> domain label:
+    APTOS 2019 (competition)              -> domain="aptos"   (source / training)
+    IDRiD (mariaherrerot/idrid-dataset)   -> domain="idrid"   (held-out target)
+    EyePACS (competition, optional)       -> domain="eyepacs" (source / training)
 """
 
 from __future__ import annotations
 
 import argparse
-import os
 import sys
 from pathlib import Path
 
@@ -47,7 +26,6 @@ import cv2
 import pandas as pd
 from tqdm import tqdm
 
-# Make `src` importable when running from repo root.
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 from src.data.preprocessing import preprocess_image  # noqa: E402
 
@@ -58,15 +36,18 @@ def _save(processed_img, out_path: Path) -> None:
 
 
 def prepare_aptos(raw_root: Path, out_root: Path, size: int) -> list[dict]:
-    """APTOS: train.csv has columns [id_code, diagnosis(0-4)]; images in train_images/."""
-    csv_path = raw_root / "aptos2019-blindness-detection" / "train.csv"
-    img_dir = raw_root / "aptos2019-blindness-detection" / "train_images"
+    """APTOS 2019 competition. train.csv: [id_code, diagnosis(0-4)]; images .png."""
+    base = raw_root / "competitions" / "aptos2019-blindness-detection"
+    csv_path = base / "train.csv"
+    img_dir = base / "train_images"
     if not csv_path.exists():
         print(f"[skip] APTOS not found at {csv_path}")
         return []
     df = pd.read_csv(csv_path)
     rows = []
     for _, r in tqdm(df.iterrows(), total=len(df), desc="aptos"):
+        if pd.isna(r.get("id_code")) or pd.isna(r.get("diagnosis")):
+            continue
         src = img_dir / f"{r['id_code']}.png"
         if not src.exists():
             continue
@@ -77,10 +58,36 @@ def prepare_aptos(raw_root: Path, out_root: Path, size: int) -> list[dict]:
     return rows
 
 
+def prepare_idrid(raw_root: Path, out_root: Path, size: int) -> list[dict]:
+    """IDRiD held-out target. idrid_labels.csv: [id_code, diagnosis(0-4), ...junk];
+    images are .jpg under Imagenes/Imagenes/."""
+    base = raw_root / "datasets" / "mariaherrerot" / "idrid-dataset"
+    csv_path = base / "idrid_labels.csv"
+    img_dir = base / "Imagenes" / "Imagenes"
+    if not csv_path.exists():
+        print(f"[skip] IDRiD not found at {csv_path}")
+        return []
+    df = pd.read_csv(csv_path)
+    rows = []
+    for _, r in tqdm(df.iterrows(), total=len(df), desc="idrid"):
+        if pd.isna(r.get("id_code")) or pd.isna(r.get("diagnosis")):
+            continue
+        src = img_dir / f"{r['id_code']}.jpg"
+        if not src.exists():
+            continue
+        out_path = out_root / "idrid" / f"{r['id_code']}.png"
+        _save(preprocess_image(str(src), size=size), out_path)
+        rows.append({"image_path": str(out_path), "grade": int(r["diagnosis"]),
+                     "domain": "idrid", "split": "test"})
+    return rows
+
+
 def prepare_eyepacs(raw_root: Path, out_root: Path, size: int) -> list[dict]:
-    """EyePACS: trainLabels.csv has [image, level(0-4)]; images are .jpeg."""
-    csv_path = raw_root / "eyepacs" / "trainLabels.csv"
-    img_dir = raw_root / "eyepacs" / "train"
+    """EyePACS (optional). trainLabels.csv: [image, level(0-4)]; images .jpeg.
+    Adjust `base` to match whatever you attach (competition vs resized mirror)."""
+    base = raw_root / "competitions" / "diabetic-retinopathy-detection"
+    csv_path = base / "trainLabels.csv"
+    img_dir = base / "train"
     if not csv_path.exists():
         print(f"[skip] EyePACS not found at {csv_path}")
         return []
@@ -97,15 +104,10 @@ def prepare_eyepacs(raw_root: Path, out_root: Path, size: int) -> list[dict]:
     return rows
 
 
-# Messidor-2 / IDRiD loaders are left as a deliberate TODO: their label files
-# differ in format, and wiring one of them up yourself is a good Week-1 exercise
-# (and good diary material). They become domain="messidor2"/"idrid", split="test".
-
-
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--raw-root", default="data/raw")
-    ap.add_argument("--out-root", default="processed")
+    ap.add_argument("--raw-root", default="/kaggle/input")
+    ap.add_argument("--out-root", default="/kaggle/working/processed")
     ap.add_argument("--size", type=int, default=512)
     args = ap.parse_args()
 
@@ -114,11 +116,12 @@ def main():
 
     rows: list[dict] = []
     rows += prepare_aptos(raw_root, out_root, args.size)
+    rows += prepare_idrid(raw_root, out_root, args.size)
     rows += prepare_eyepacs(raw_root, out_root, args.size)
 
     if not rows:
-        print("No data processed. Did you download the raw datasets first? "
-              "See the instructions at the top of this file.")
+        print("No data processed. Are APTOS / IDRiD attached, and is "
+              "--raw-root pointing at /kaggle/input ?")
         return
 
     df = pd.DataFrame(rows)
